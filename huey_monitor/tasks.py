@@ -7,7 +7,7 @@ import traceback
 import uuid
 from functools import lru_cache
 
-from django.db import transaction
+from django.db import DatabaseError, transaction
 from django.db.models import Sum
 from huey.contrib.djhuey import on_startup, signal
 
@@ -107,7 +107,12 @@ def startup_handler():
     logger.debug('startup handler called')
 
     with transaction.atomic():
-        qs = TaskModel.objects.filter(state__signal_name='executing')
+        try:
+            qs = TaskModel.objects.select_for_update(nowait=True).filter(state__signal_name='executing')
+        except DatabaseError:
+            logger.debug('Unable to obtain TaskModel lock')
+            return
+
         for task_model_instance in qs:
             logger.warning('Mark "executing" task %s to "unknown"', task_model_instance.pk)
             last_signal = SignalInfoModel.objects.create(
